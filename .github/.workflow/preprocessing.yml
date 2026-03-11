@@ -1,0 +1,103 @@
+name: Automated Gold Price Preprocessing
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Alasan menjalankan workflow secara manual'
+        required: false
+        default: 'Manual trigger untuk preprocessing ulang'
+
+jobs:
+  preprocessing:
+    runs-on: ubuntu-latest
+    name: Run Gold Price Preprocessing
+
+    steps:
+      # ─── 1. Checkout Repository ─────────────────────────────────────────
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # ─── 2. Setup Python ────────────────────────────────────────────────
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.7'
+          cache: 'pip'
+
+      # ─── 3. Install Dependencies ────────────────────────────────────────
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas==2.2.2 numpy==1.26.4 scikit-learn==1.5.2
+
+      # ─── 4. Verify Dataset Exists ───────────────────────────────────────
+      - name: Verify Dataset
+        run: |
+          echo "Checking dataset/gold_raw.csv..."
+          if [ -f "dataset/gold_raw.csv" ]; then
+            echo "✅ Dataset found!"
+            head -3 dataset/gold_raw.csv
+          else
+            echo "❌ Dataset not found at dataset/gold_raw.csv!"
+            exit 1
+          fi
+
+      # ─── 5. Run Preprocessing ───────────────────────────────────────────
+      - name: Run Automated Preprocessing
+        run: |
+          echo "🚀 Starting preprocessing pipeline..."
+          python preprocessing/automate_Robil.py
+
+      # ─── 6. Verify Output ───────────────────────────────────────────────
+      - name: Verify Preprocessing Output
+        run: |
+          echo "Checking output files..."
+          for f in \
+            "preprocessing/gold_preprocessing/gold_train.csv" \
+            "preprocessing/gold_preprocessing/gold_test.csv" \
+            "preprocessing/gold_preprocessing/gold_full_preprocessed.csv"; do
+            if [ -f "$f" ]; then
+              lines=$(wc -l < "$f")
+              echo "✅ $f — $lines baris"
+            else
+              echo "❌ $f tidak ditemukan!"
+              exit 1
+            fi
+          done
+
+      # ─── 7. Upload Preprocessed Dataset as Artifact ─────────────────────
+      - name: Upload Preprocessed Dataset
+        uses: actions/upload-artifact@v4
+        with:
+          name: gold-preprocessed-${{ github.run_number }}
+          path: preprocessing/gold_preprocessing/
+          retention-days: 30
+
+      # ─── 8. Commit & Push Preprocessed Data ─────────────────────────────
+      - name: Commit Preprocessed Data to Repository
+        run: |
+          git config user.name  "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add preprocessing/gold_preprocessing/
+          git diff --cached --quiet || \
+            git commit -m "ci: update preprocessed gold price dataset [run #${{ github.run_number }}]"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ─── 9. Summary ─────────────────────────────────────────────────────
+      - name: Print Summary
+        run: |
+          echo "======================================"
+          echo "✅ PREPROCESSING COMPLETED SUCCESSFULLY"
+          echo "======================================"
+          echo "Run Number : ${{ github.run_number }}"
+          echo "Triggered  : ${{ github.event_name }}"
+          echo "Branch     : ${{ github.ref_name }}"
+          echo ""
+          echo "Output files:"
+          ls -lh preprocessing/gold_preprocessing/
